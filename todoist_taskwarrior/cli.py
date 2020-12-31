@@ -163,8 +163,11 @@ def migrate(ctx, interactive, sync, map_project, map_tag, filter_task_id, filter
         # Log message and check if exists
         io.important(f'Task {idx + 1} of {len(tasks)}: {name}')
         logging.debug(f'ITER_TASK task={task}')
-        if check_task_exists(tid):
+        tw_task = get_task(tid)
+        if tw_task:
             io.info(f'Already exists (todoist_id={tid})')
+            if close_if_needed(tw_task, task):
+                io.info(f'Closed task (todoist_id={tid})')
             continue
 
         # Project
@@ -215,10 +218,26 @@ def migrate(ctx, interactive, sync, map_project, map_tag, filter_task_id, filter
             add_task_interactive(**data)
 
 
-def check_task_exists(tid):
-    """ Given a Taskwarrior ID, check if the task exists """
+def get_task(tid):
+    """ Given a Todoist ID, check if the task exists """
     _, task = taskwarrior.get_task(todoist_id=tid)
-    return bool(task)
+    return task
+
+
+TW_STATUS_PENDING = "pending"
+
+
+def close_if_needed(tw_task, task):
+    """Close existing TaskWarrior task if it is closed on Todoist.
+
+    True is returned if task is closed.
+
+    TODO: And vice versa later when sync from TW to Todoist will be available.
+    """
+    if task['checked'] == 1 and tw_task['status'] == TW_STATUS_PENDING:
+        taskwarrior.task_done(id=tw_task['id'])
+        return True
+    return False
 
 
 def add_task(tid, name, project, tags, priority, entry, due, recur):
@@ -370,4 +389,3 @@ def make_filter_fn(filter_dict):
 
 if __name__ == '__main__':
     cli()
-
