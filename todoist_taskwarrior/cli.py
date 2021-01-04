@@ -210,13 +210,61 @@ def migrate(ctx, interactive, sync, map_project, map_tag, filter_task_id, filter
             add_task_interactive(**data)
 
 
+@cli.command()
+@click.option('--sync/--no-sync', default=True,
+        help='Enable/disable Todoist synchronization of the local task cache.')
+@click.option('--taskw/--no-taskw', default=True,
+              help='Enable/disable synchronization to TaskWarrior.')
+@click.option('--todoist/--no-todoist', default=True,
+              help='Enable/disable synchronization to Todoist.')
+@click.pass_context
+def sync(ctx, sync, taskw, todoist):
+    """2-way synchronization between TaskWarrior and Todoist.
+    """
+    # TODO: bad naming of option. Could be --todoist-cache.
+    if sync:
+        ctx.invoke(synchronize)
+
+    todoist_tasks = get_todoist_tasks()
+
+    if todoist:
+        close_todoist_tasks(todoist_tasks)
+
+    if taskw is True:
+        ctx.invoke(migrate)
+
+
+TW_STATUS_PENDING = "pending"
+TW_STATUS_COMPLETED = "completed"
+
+
+def close_todoist_tasks(tdtasks):
+    """Close tasks on Todoist if those are already closed on TaskWarrior."""
+    for task in tdtasks:
+        tid = task['id']
+        twtask = get_task(tid)
+        if (twtask and twtask["status"] == TW_STATUS_COMPLETED
+                and task['checked'] != 1):
+            io.info(f'Closed Todoist task (todoist_id={tid})')
+            todoist.items.close(task['id'])
+    todoist.commit()
+    todoist.sync()
+
+
+def get_pending_tasks():
+    """Return pending TaskWarrior tasks.
+
+    This does not include tasks which are waiting to be displayed (pending but
+    not displayed in TaskWarrior because current date hasn't reached the
+    "Waiting" date yet).
+    """
+    return taskwarrior.filter_tasks({"status": TW_STATUS_PENDING})
+
+
 def get_task(tid):
     """ Given a Todoist ID, check if the task exists """
     _, task = taskwarrior.get_task(todoist_id=tid)
     return task
-
-
-TW_STATUS_PENDING = "pending"
 
 
 def close_if_needed(tw_task, task):
