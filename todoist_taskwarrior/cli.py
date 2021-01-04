@@ -140,16 +140,8 @@ def migrate(ctx, interactive, sync, map_project, map_tag, filter_task_id, filter
     if sync:
         ctx.invoke(synchronize)
 
-    # Build filter function
-    filt = {}
-    if filter_task_id:
-        filt['id'] = filter_task_id
-    if filter_proj_id:
-        filt['project_id'] = filter_proj_id
-    filter_fn = make_filter_fn(filt)
-
     # Get all matching Todoist tasks
-    tasks = todoist.items.all(filt=filter_fn)
+    tasks = get_todoist_tasks(filter_task_id, filter_proj_id)
     if not tasks:
         io.warn('No matching tasks found (are you using filters?)')
         return
@@ -368,6 +360,22 @@ def parse_recur_or_prompt(due):
             default='',
             value_proc=validation.validate_recur,
         )
+
+
+def get_todoist_tasks(filter_task_id=None, filter_proj_id=None):
+    """Return tasks from Todoist."""
+    # Build filter function
+    filt = {}
+    if filter_task_id:
+        filt['id'] = filter_task_id
+    if filter_proj_id:
+        filt['project_id'] = filter_proj_id
+    filter_fn = make_filter_fn(filt)
+
+    # Get all matching Todoist tasks
+    tasks = todoist.items.all(filt=filter_fn)
+    return tasks
+
 
 def make_filter_fn(filter_dict):
     """Returns a lambda which, when given a Todoist task, will check
