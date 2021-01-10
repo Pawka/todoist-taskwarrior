@@ -161,11 +161,15 @@ def migrate(ctx, interactive, sync, map_project, map_tag, filter_task_id, filter
                 io.info(f'Closed task (todoist_id={tid})')
             continue
 
-        data = map_to_tw(task)
+        data = map_to_tw(task, map_project, map_tag)
+        tw_task = None
         if not interactive:
-            add_task(**data)
+            tw_task = add_task(**data)
         else:
-            add_task_interactive(**data)
+            tw_task = add_task_interactive(**data)
+        if tw_task:
+            if close_if_needed(tw_task, task):
+                io.info(f'Closed task (todoist_id={tid})')
 
 
 def project_name_from_todoist(project_id, map_project):
