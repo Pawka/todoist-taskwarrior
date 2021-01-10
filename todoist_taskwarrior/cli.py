@@ -148,9 +148,8 @@ def migrate(ctx, interactive, sync, map_project, map_tag, filter_task_id, filter
 
     io.important(f'Starting migration of {len(tasks)} tasks...')
     for idx, task in enumerate(tasks):
-        data = {}
-        tid = data['tid'] = task['id']
-        name = data['name'] = task['content']
+        tid = task['id']
+        name = task['content']
 
         # Log message and check if exists
         io.important(f'Task {idx + 1} of {len(tasks)}: {name}')
@@ -162,52 +161,56 @@ def migrate(ctx, interactive, sync, map_project, map_tag, filter_task_id, filter
                 io.info(f'Closed task (todoist_id={tid})')
             continue
 
-        # Project
-        p = todoist.projects.get_by_id(task['project_id'])
-        logging.debug(f"GET_PROJECT_BY_ID project_id={task['project_id']} project={p}")
-        if p:
-            project_hierarchy = [p]
-            while p['parent_id']:
-                p = todoist.projects.get_by_id(p['parent_id'])
-                project_hierarchy.insert(0, p)
-                logging.debug(f"PROJECT_HIERARCHY parent_id={p['parent_id']} hierarchy={project_hierarchy}")
-
-            project_name = '.'.join(p['name'] for p in project_hierarchy)
-            logging.debug(f'PROJECT_HIERARCHY project_name={project_name}')
-
-            project_name = utils.try_map(
-                map_project,
-                project_name
-            )
-        else:
-            project_name = ''
-
-        logging.debug(f'GET_PROJECT_NAME project_name={project_name}')
-        if not p and task['project_id']:
-            logging.warn(f"PROJECT_NOT_FOUND project={p} project_id={task['project_id']}")
-
-        # Project
-        data['project'] = utils.maybe_quote_ws(project_name)
-
-        # Priority
-        data['priority'] = utils.parse_priority(task['priority'])
-
-        # Tags
-        logging.debug(f"TAGS labels={task['labels']}")
-        data['tags'] = [
-            utils.try_map(map_tag, todoist.labels.get_by_id(l_id)['name'])
-            for l_id in task['labels']
-        ]
-
-        # Dates
-        data['entry'] = utils.parse_date(task['date_added'])
-        data['due'] = utils.parse_due(utils.try_get_model_prop(task, 'due'))
-        data['recur'] = parse_recur_or_prompt(utils.try_get_model_prop(task, 'due'))
-
+        data = map_to_tw(task)
         if not interactive:
             add_task(**data)
         else:
             add_task_interactive(**data)
+
+
+def project_name_from_todoist(project_id, map_project):
+    # Project
+    p = todoist.projects.get_by_id(project_id)
+    logging.debug(f"GET_PROJECT_BY_ID project_id={project_id} project={p}")
+    project_name = ''
+    if p:
+        project_hierarchy = [p]
+        while p['parent_id']:
+            p = todoist.projects.get_by_id(p['parent_id'])
+            project_hierarchy.insert(0, p)
+            logging.debug(f"PROJECT_HIERARCHY parent_id={p['parent_id']} hierarchy={project_hierarchy}")
+        project_name = '.'.join(p['name'] for p in project_hierarchy)
+        logging.debug(f'PROJECT_HIERARCHY project_name={project_name}')
+
+        project_name = utils.try_map(
+            map_project,
+            project_name
+        )
+    return project_name
+
+
+def map_to_tw(task, map_project, map_tag):
+    """Map Todoist task to TaskWarrior task."""
+    project_name = project_name_from_todoist(task['project_id'], map_project)
+    data = {
+        'tid': task['id'],
+        'name': task['content'],
+        'project': utils.maybe_quote_ws(project_name),
+        'priority': utils.parse_priority(task['priority']),
+        'entry': utils.parse_date(task['date_added']),
+        'due': utils.parse_due(utils.try_get_model_prop(task, 'due')),
+        'recur': parse_recur_or_prompt(utils.try_get_model_prop(task, 'due')),
+    }
+
+    # Tags
+    logging.debug(f"TAGS labels={task['labels']}")
+    data['tags'] = [
+        utils.try_map(map_tag, todoist.labels.get_by_id(l_id)['name'])
+        for l_id in task['labels']
+    ]
+
+    # Dates
+    return data
 
 
 @cli.command()
