@@ -2,6 +2,7 @@ import click
 import re
 import dateutil.parser
 from .errors import UnsupportedRecurrence
+from datetime import timedelta
 
 
 """ Mappings """
@@ -60,10 +61,10 @@ def parse_due(due):
     if not due:
         return None
 
-    return parse_date(due['date'])
+    return parse_date(due['date'], timedelta(days=1))
 
 
-def parse_date(date):
+def parse_date(date, delta=None):
     """ Converts a date from Todoist to Taskwarrior.
 
     Todoist: Fri 26 Sep 2014 08:25:05 +0000 (what is this called)?
@@ -72,7 +73,11 @@ def parse_date(date):
     if not date:
         return None
 
-    return dateutil.parser.parse(date).isoformat()
+    parsed = dateutil.parser.parse(date)
+    if delta:
+        parsed += delta
+
+    return parsed.isoformat()
 
 
 def parse_recur(due):
@@ -243,4 +248,3 @@ def _recur_special(date_string):
         return 'weekdays'
     elif label == 'last day':
         return 'monthly'
-
