@@ -32,23 +32,6 @@ ID is saved with the task, subsequent runs will detect and skip duplicates.
 To try things out without clobbering your normal taskwarrior install, you can point
 to the taskwarrior directory in `sandbox/` by using `--tw-config-file=./sandbox/.taskrc`.
 
-Using the `--interactive` (or `-i`) flag will prompt the user for input for each task,
-allowing the task to be modified before import:
-
-```sh
-$ python -m todoist_taskwarrior.cli migrate --interactive
-Task 1 of 315: Work on an open source project
-
-tid: 142424242
-name: Work on an open source project
-project: Open Source
-priority:
-tags:
-entry: 2019-01-18T12:00:00+00:00
-due: 2019-01-21T17:00:00+00:00
-recur: 3 days
-```
-
 By default, `migrate` will refetch all tasks from Todoist on each run. To skip
 this step and use the cached data without refetching, use the --no-sync flag.
 
@@ -92,4 +75,3 @@ $ python -m todoist_taskwarrior.cli \
 ```sh
 $ python -m pytest tests
 ```
-

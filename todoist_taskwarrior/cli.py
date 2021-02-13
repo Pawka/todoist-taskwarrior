@@ -85,9 +85,6 @@ def clean():
 
 
 @cli.command()
-@click.option('-i', '--interactive', is_flag=True, default=False,
-        help='Interactively choose which tasks to import and modify them '
-             'during the import.')
 @click.option('--sync/--no-sync', default=True,
         help='Enable/disable Todoist synchronization of the local task cache.')
 @click.option('-p', '--map-project', metavar='SRC=DST', multiple=True,
@@ -103,18 +100,13 @@ def clean():
 @click.option('--filter-proj-id', type=int,
         help='Only import the tasks in the project matching the given ID')
 @click.pass_context
-def migrate(ctx, interactive, sync, map_project, map_tag, filter_task_id, filter_proj_id):
+def migrate(ctx, sync, map_project, map_tag, filter_task_id, filter_proj_id):
     """Migrate tasks from Todoist to Taskwarrior.
 
     By default this command will synchronize with the Todoist servers
     and then migrate all tasks to Taskwarrior.
 
     Pass --no-sync to skip synchronization.
-
-    Passing -i or --interactive allows more control over the import, putting
-    the user into an interactive command loop. Per task, the user can decide
-    whether to skip, rename, change the priority, or change the tags, before
-    moving on to the next task.
 
     Use --map-project to change or remove the project. Project hierarchies will
     be period-delimited during conversion. For example in the following,
@@ -132,7 +124,7 @@ def migrate(ctx, interactive, sync, map_project, map_tag, filter_task_id, filter
     `todoist_id` property on the task.
     """
     logging.debug(
-        f'MIGRATE version={__version__} interactive={interactive} '
+        f'MIGRATE version={__version__} '
         f'sync={sync} map_project={map_project} map_tag={map_tag} '
         f'filter_task_id={filter_task_id} filter_proj_id={filter_proj_id}'
     )
@@ -162,11 +154,7 @@ def migrate(ctx, interactive, sync, map_project, map_tag, filter_task_id, filter
             continue
 
         data = map_to_tw(task, map_project, map_tag)
-        tw_task = None
-        if not interactive:
-            tw_task = add_task(**data)
-        else:
-            tw_task = add_task_interactive(**data)
+        tw_task = add_task(**data)
         if tw_task:
             if close_if_needed(tw_task, task):
                 io.info(f'Closed task (todoist_id={tid})')
@@ -303,106 +291,6 @@ def add_task(tid, name, project, tags, priority, entry, due, recur):
             recur=recur,
             todoist_id=tid,
         )
-
-
-def add_task_interactive(**task_data):
-    """Interactively add tasks
-
-    y - add task
-    n - skip task
-    d - change description
-    P - change project
-    p - change priority
-    t - change tags
-    r - change recur
-    q - quit immediately
-    ? - print help
-    """
-    callbacks = {
-        'y': lambda: task_data,
-        'n': lambda: task_data,
-
-        # Rename
-        'd': lambda: {
-            **task_data,
-            'name': io.prompt(
-                'Set name',
-                default=task_data['name'],
-                value_proc=lambda x: x.strip(),
-            ),
-        },
-
-        # Edit tags
-        't': lambda: {
-            **task_data,
-            'tags': io.prompt(
-                'Set tags (space delimited)',
-                default=' '.join(task_data['tags']),
-                show_default=False,
-                value_proc=lambda x: x.split(' '),
-            ),
-        },
-
-        # Edit project
-        'P': lambda: {
-            **task_data,
-            'project': io.prompt(
-                'Set project',
-                default=task_data['project'],
-            ),
-        },
-
-        # Edit priority
-        'p': lambda: {
-            **task_data,
-            'priority': io.prompt(
-                'Set priority',
-                default='',
-                show_default=False,
-                type=click.Choice(['L', 'M', 'H', '']),
-            ),
-        },
-
-        # Edit recur
-        'r': lambda: {
-            **task_data,
-            'recur': io.prompt(
-                'Set recurrence (todoist style)',
-                default='',
-                value_proc=validation.validate_recur,
-            ),
-        },
-
-
-        # Quit
-        'q': lambda: exit(1),
-
-        # Help message
-        # Note: this echoes prompt help and then returns the
-        # task_data unchanged.
-        '?': lambda: io.warn('\n'.join([
-            x.strip() for x in
-            add_task_interactive.__doc__.split('\n')
-        ])) or task_data,
-    }
-
-    response = None
-    while response not in ('y', 'n'):
-        io.task(task_data)
-        response = io.prompt(
-            "Import this task?",
-            type=click.Choice(callbacks.keys()),
-            show_choices=True,
-        )
-
-        # Execute operation
-        task_data = callbacks[response]()
-
-    if response == 'n':
-        io.warn('Skipping task')
-        return
-
-    return add_task(**task_data)
 
 
 def parse_recur_or_prompt(due):
