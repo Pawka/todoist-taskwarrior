@@ -147,13 +147,18 @@ def migrate(ctx, sync, map_project, map_tag, filter_task_id, filter_proj_id):
         io.important(f'Task {idx + 1} of {len(tasks)}: {name}')
         logging.debug(f'ITER_TASK task={task}')
         tw_task = get_task(tid)
+        data = map_to_tw(task, map_project, map_tag)
         if tw_task:
             io.info(f'Already exists (todoist_id={tid})')
             if close_if_needed(tw_task, task):
                 io.info(f'Closed task (todoist_id={tid})')
+                continue
+
+            if tw_task['status'] == TW_STATUS_PENDING:
+                update_task(tw_task, data)
+                io.info(f'Updated task (todoist_id={tid})')
             continue
 
-        data = map_to_tw(task, map_project, map_tag)
         tw_task = add_task(**data)
         if tw_task:
             if close_if_needed(tw_task, task):
@@ -186,7 +191,7 @@ def map_to_tw(task, map_project, map_tag):
     project_name = project_name_from_todoist(task['project_id'], map_project)
     data = {
         'tid': task['id'],
-        'name': task['content'],
+        'description': task['content'],
         'project': utils.maybe_quote_ws(project_name),
         'priority': utils.parse_priority(task['priority']),
         'entry': utils.parse_date(task['date_added']),
@@ -203,6 +208,14 @@ def map_to_tw(task, map_project, map_tag):
 
     # Dates
     return data
+
+
+def update_task(task, data):
+    """Update TaskWarrior given task with data."""
+    keys = "description due project".split()
+    for key in keys:
+        task[key] = data[key]
+    taskwarrior.task_update(task)
 
 
 @cli.command()
@@ -275,14 +288,14 @@ def close_if_needed(tw_task, task):
     return False
 
 
-def add_task(tid, name, project, tags, priority, entry, due, recur):
+def add_task(tid, description, project, tags, priority, entry, due, recur):
     """Add a taskwarrior task from todoist task
 
     Returns the taskwarrior task.
     """
     with io.with_feedback(f"Importing '{name}' ({project})"):
         return taskwarrior.task_add(
-            name,
+            description,
             project=project,
             tags=tags,
             priority=priority,
