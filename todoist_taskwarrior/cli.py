@@ -293,7 +293,7 @@ def add_task(tid, description, project, tags, priority, entry, due, recur):
 
     Returns the taskwarrior task.
     """
-    with io.with_feedback(f"Importing '{name}' ({project})"):
+    with io.with_feedback(f"Importing '{description}' ({project})"):
         return taskwarrior.task_add(
             description,
             project=project,
