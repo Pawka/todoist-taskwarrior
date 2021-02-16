@@ -74,6 +74,11 @@ TW_STATUS_COMPLETED = "completed"
 
 class TaskWarrior:
     def __init__(self, config_file):
+        # Create the TaskWarrior client, overriding config with `todoist_id`
+        # field which we will use to track migrated tasks and prevent imports.
+        # The path to the taskwarrior config file can be set with the flag, but
+        # otherwise, the TASKRC envvar will be used if present. The taskwarrior
+        # default value is used if neither are specified.
         self.client = TW(
             config_filename=config_file,
             config_overrides={'uda.todoist_id.type': 'string'},
@@ -117,3 +122,7 @@ class TaskWarrior:
                 recur=recur,
                 todoist_id=tid,
             )
+
+    def close(self, id):
+        """Close task by id."""
+        self.client.task_done(id=id)

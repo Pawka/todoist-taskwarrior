@@ -14,7 +14,6 @@ from . import __title__, __version__
 TODOIST_CACHE = '~/.todoist-sync/'
 
 todoist = None
-taskwarrior = None
 
 
 class Ctx:
@@ -32,23 +31,13 @@ class Ctx:
 @click.pass_context
 def cli(ctx, todoist_api_key, tw_config_file, debug):
     """Manage the migration of data from Todoist into Taskwarrior. """
-    global todoist, taskwarrior
+    global todoist
 
     ctx.ensure_object(Ctx)
 
     # Configure Todoist with API key and cache
     todoist = TodoistAPI(todoist_api_key, cache=TODOIST_CACHE)
     ctx.obj.td = gateways.Todoist(todoist_api_key)
-
-    # Create the TaskWarrior client, overriding config with `todoist_id` field
-    # which we will use to track migrated tasks and prevent imports.
-    # The path to the taskwarrior config file can be set with the flag, but
-    # otherwise, the TASKRC envvar will be used if present. The taskwarrior
-    # default value is used if neither are specified.
-    taskwarrior = TaskWarrior(
-        config_filename=tw_config_file,
-        config_overrides={ 'uda.todoist_id.type': 'string' },
-    )
     ctx.obj.tw = gateways.TaskWarrior(tw_config_file)
 
     # Setup logging
@@ -161,7 +150,7 @@ def migrate(ctx, sync, map_project, map_tag, filter_task_id, filter_proj_id):
         data = map_to_tw(ctx, task, map_project, map_tag)
         if tw_task:
             io.info(f'Already exists (todoist_id={tid})')
-            if close_if_needed(tw_task, task):
+            if close_if_needed(ctx, tw_task, task):
                 io.info(f'Closed task (todoist_id={tid})')
                 continue
 
@@ -172,7 +161,7 @@ def migrate(ctx, sync, map_project, map_tag, filter_task_id, filter_proj_id):
 
         tw_task = ctx.obj.tw.add_task(**data)
         if tw_task:
-            if close_if_needed(tw_task, task):
+            if close_if_needed(ctx, tw_task, task):
                 io.info(f'Closed task (todoist_id={tid})')
 
 
@@ -241,7 +230,7 @@ def close_todoist_tasks(ctx, tdtasks):
     todoist.sync()
 
 
-def close_if_needed(tw_task, task):
+def close_if_needed(ctx, tw_task, task):
     """Close existing TaskWarrior task if it is closed on Todoist.
 
     True is returned if task is closed.
@@ -249,7 +238,7 @@ def close_if_needed(tw_task, task):
     TODO: And vice versa later when sync from TW to Todoist will be available.
     """
     if task['checked'] == 1 and tw_task['status'] == TW_STATUS_PENDING:
-        taskwarrior.task_done(id=tw_task['id'])
+        ctx.obj.tw.close(id=tw_task['id'])
         return True
     return False
 
