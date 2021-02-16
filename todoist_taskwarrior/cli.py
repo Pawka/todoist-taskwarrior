@@ -1,26 +1,10 @@
 import click
 import logging
 import os
-import sys
 
-from taskw import TaskWarrior
 from todoist.api import TodoistAPI
 from . import errors, io, utils, validation, gateways
 from . import __title__, __version__
-
-
-# This is the location where the todoist
-# data will be cached.
-TODOIST_CACHE = '~/.todoist-sync/'
-
-todoist = None
-
-
-class Ctx:
-    """Context class to hold data shared between cli commands such as gateways.
-    """
-    td = None
-    tw = None
 
 
 @click.group()
@@ -31,12 +15,10 @@ class Ctx:
 @click.pass_context
 def cli(ctx, todoist_api_key, tw_config_file, debug):
     """Manage the migration of data from Todoist into Taskwarrior. """
-    global todoist
-
     ctx.ensure_object(Ctx)
 
     # Configure Todoist with API key and cache
-    todoist = TodoistAPI(todoist_api_key, cache=TODOIST_CACHE)
+    ctx.obj.todoist = TodoistAPI(todoist_api_key, cache=gateways.TODOIST_CACHE)
     ctx.obj.td = gateways.Todoist(todoist_api_key)
     ctx.obj.tw = gateways.TaskWarrior(tw_config_file)
 
@@ -44,6 +26,13 @@ def cli(ctx, todoist_api_key, tw_config_file, debug):
     level = logging.DEBUG if debug else logging.INFO
     logging.basicConfig(level=level)
 
+
+class Ctx:
+    """Context class to hold data shared between cli commands such as gateways.
+    """
+    td = None
+    tw = None
+    todoist = None  # TODO: remove after full migration to gateway.
 
 
 @cli.command()
@@ -64,7 +53,7 @@ def synchronize(ctx):
 
 
 @cli.command()
-@click.confirmation_option(prompt=f'Are you sure you want to delete {TODOIST_CACHE}?')
+@click.confirmation_option(prompt=f'Are you sure you want to delete {gateways.TODOIST_CACHE}?')
 def clean():
     """Remove the data stored in the Todoist task cache.
 
@@ -72,7 +61,7 @@ def clean():
 
         ~/.todoist-sync
     """
-    cache_dir = os.path.expanduser(TODOIST_CACHE)
+    cache_dir = os.path.expanduser(gateways.TODOIST_CACHE)
 
     # Delete all files in directory
     for file_entry in os.scandir(cache_dir):
@@ -181,7 +170,7 @@ def map_to_tw(ctx, task, map_project, map_tag):
     # Tags
     logging.debug(f"TAGS labels={task['labels']}")
     data['tags'] = [
-        utils.try_map(map_tag, todoist.labels.get_by_id(l_id)['name'])
+        utils.try_map(map_tag, ctx.obj.todoist.labels.get_by_id(l_id)['name'])
         for l_id in task['labels']
     ]
 
@@ -225,9 +214,9 @@ def close_todoist_tasks(ctx, tdtasks):
         if (twtask and twtask["status"] == TW_STATUS_COMPLETED
                 and task['checked'] != 1):
             io.info(f'Closed Todoist task (todoist_id={tid})')
-            todoist.items.close(task['id'])
-    todoist.commit()
-    todoist.sync()
+            ctx.obj.todoist.items.close(task['id'])
+    ctx.obj.todoist.commit()
+    ctx.obj.todoist.sync()
 
 
 def close_if_needed(ctx, tw_task, task):
