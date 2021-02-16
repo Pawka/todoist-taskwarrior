@@ -16,6 +16,7 @@ TODOIST_CACHE = '~/.todoist-sync/'
 todoist = None
 td = None
 taskwarrior = None
+tw = None
 
 
 """ CLI Commands """
@@ -27,7 +28,7 @@ taskwarrior = None
 @click.option('--debug', is_flag=True, default=False)
 def cli(todoist_api_key, tw_config_file, debug):
     """Manage the migration of data from Todoist into Taskwarrior. """
-    global todoist, taskwarrior, td
+    global todoist, taskwarrior, td, tw
 
     # Configure Todoist with API key and cache
     todoist = TodoistAPI(todoist_api_key, cache=TODOIST_CACHE)
@@ -42,6 +43,7 @@ def cli(todoist_api_key, tw_config_file, debug):
         config_filename=tw_config_file,
         config_overrides={ 'uda.todoist_id.type': 'string' },
     )
+    tw = gateways.TaskWarrior(tw_config_file)
 
     # Setup logging
     level = logging.DEBUG if debug else logging.INFO
@@ -148,7 +150,7 @@ def migrate(ctx, sync, map_project, map_tag, filter_task_id, filter_proj_id):
         # Log message and check if exists
         io.important(f'Task {idx + 1} of {len(tasks)}: {name}')
         logging.debug(f'ITER_TASK task={task}')
-        tw_task = get_task(tid)
+        tw_task = tw.get_task(tid)
         data = map_to_tw(task, map_project, map_tag)
         if tw_task:
             io.info(f'Already exists (todoist_id={tid})')
@@ -157,11 +159,11 @@ def migrate(ctx, sync, map_project, map_tag, filter_task_id, filter_proj_id):
                 continue
 
             if tw_task['status'] == TW_STATUS_PENDING:
-                update_task(tw_task, data)
+                tw.update(tw_task, data)
                 io.info(f'Updated task (todoist_id={tid})')
             continue
 
-        tw_task = add_task(**data)
+        tw_task = tw.add_task(**data)
         if tw_task:
             if close_if_needed(tw_task, task):
                 io.info(f'Closed task (todoist_id={tid})')
@@ -189,14 +191,6 @@ def map_to_tw(task, map_project, map_tag):
 
     # Dates
     return data
-
-
-def update_task(task, data):
-    """Update TaskWarrior given task with data."""
-    keys = "description due project".split()
-    for key in keys:
-        task[key] = data[key]
-    taskwarrior.task_update(task)
 
 
 @cli.command()
@@ -231,29 +225,13 @@ def close_todoist_tasks(tdtasks):
     """Close tasks on Todoist if those are already closed on TaskWarrior."""
     for task in tdtasks:
         tid = task['id']
-        twtask = get_task(tid)
+        twtask = tw.get_task(tid)
         if (twtask and twtask["status"] == TW_STATUS_COMPLETED
                 and task['checked'] != 1):
             io.info(f'Closed Todoist task (todoist_id={tid})')
             todoist.items.close(task['id'])
     todoist.commit()
     todoist.sync()
-
-
-def get_pending_tasks():
-    """Return pending TaskWarrior tasks.
-
-    This does not include tasks which are waiting to be displayed (pending but
-    not displayed in TaskWarrior because current date hasn't reached the
-    "Waiting" date yet).
-    """
-    return taskwarrior.filter_tasks({"status": TW_STATUS_PENDING})
-
-
-def get_task(tid):
-    """ Given a Todoist ID, check if the task exists """
-    _, task = taskwarrior.get_task(todoist_id=tid)
-    return task
 
 
 def close_if_needed(tw_task, task):
@@ -267,24 +245,6 @@ def close_if_needed(tw_task, task):
         taskwarrior.task_done(id=tw_task['id'])
         return True
     return False
-
-
-def add_task(tid, description, project, tags, priority, entry, due, recur):
-    """Add a taskwarrior task from todoist task
-
-    Returns the taskwarrior task.
-    """
-    with io.with_feedback(f"Importing '{description}' ({project})"):
-        return taskwarrior.task_add(
-            description,
-            project=project,
-            tags=tags,
-            priority=priority,
-            entry=entry,
-            due=due,
-            recur=recur,
-            todoist_id=tid,
-        )
 
 
 def parse_recur_or_prompt(due):

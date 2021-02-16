@@ -1,7 +1,8 @@
 import logging
 
 from todoist.api import TodoistAPI
-from . import utils
+from taskw import TaskWarrior as TW
+from . import utils, io
 
 TODOIST_CACHE = '~/.todoist-sync/'
 
@@ -65,3 +66,54 @@ def make_filter_fn(filter_dict):
         return True
 
     return fn
+
+
+TW_STATUS_PENDING = "pending"
+TW_STATUS_COMPLETED = "completed"
+
+
+class TaskWarrior:
+    def __init__(self, config_file):
+        self.client = TW(
+            config_filename=config_file,
+            config_overrides={'uda.todoist_id.type': 'string'},
+        )
+
+    def update(self, task, data):
+        """Update given task with data."""
+        keys = "description due project".split()
+        for key in keys:
+            task[key] = data[key]
+        self.client.task_update(task)
+
+    def get_pending_tasks(self):
+        """Return pending TaskWarrior tasks.
+
+        This does not include tasks which are waiting to be displayed (pending
+        but not displayed in TaskWarrior because current date hasn't reached
+        the "Waiting" date yet).
+        """
+        return self.client.filter_tasks({"status": TW_STATUS_PENDING})
+
+    def get_task(self, tid):
+        """ Given a Todoist ID, check if the task exists """
+        _, task = self.client.get_task(todoist_id=tid)
+        return task
+
+    def add_task(self,
+                 tid, description, project, tags, priority, entry, due, recur):
+        """Add a taskwarrior task from todoist task
+
+        Returns the taskwarrior task.
+        """
+        with io.with_feedback(f"Importing '{description}' ({project})"):
+            return self.client.task_add(
+                description,
+                project=project,
+                tags=tags,
+                priority=priority,
+                entry=entry,
+                due=due,
+                recur=recur,
+                todoist_id=tid,
+            )
