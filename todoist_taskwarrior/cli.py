@@ -5,7 +5,7 @@ import sys
 
 from taskw import TaskWarrior
 from todoist.api import TodoistAPI
-from . import errors, io, utils, validation
+from . import errors, io, utils, validation, gateways
 from . import __title__, __version__
 
 
@@ -14,6 +14,7 @@ from . import __title__, __version__
 TODOIST_CACHE = '~/.todoist-sync/'
 
 todoist = None
+td = None
 taskwarrior = None
 
 
@@ -26,10 +27,11 @@ taskwarrior = None
 @click.option('--debug', is_flag=True, default=False)
 def cli(todoist_api_key, tw_config_file, debug):
     """Manage the migration of data from Todoist into Taskwarrior. """
-    global todoist, taskwarrior
+    global todoist, taskwarrior, td
 
     # Configure Todoist with API key and cache
     todoist = TodoistAPI(todoist_api_key, cache=TODOIST_CACHE)
+    td = gateways.Todoist(todoist_api_key)
 
     # Create the TaskWarrior client, overriding config with `todoist_id` field
     # which we will use to track migrated tasks and prevent imports.
@@ -60,7 +62,7 @@ def synchronize():
         ~/.todoist-sync
     """
     with io.with_feedback('Syncing tasks with todoist'):
-        todoist.sync()
+        td.sync()
 
 
 @cli.command()
@@ -133,7 +135,7 @@ def migrate(ctx, sync, map_project, map_tag, filter_task_id, filter_proj_id):
         ctx.invoke(synchronize)
 
     # Get all matching Todoist tasks
-    tasks = get_todoist_tasks(filter_task_id, filter_proj_id)
+    tasks = td.get_tasks(filter_task_id, filter_proj_id)
     if not tasks:
         io.warn('No matching tasks found (are you using filters?)')
         return
@@ -165,30 +167,9 @@ def migrate(ctx, sync, map_project, map_tag, filter_task_id, filter_proj_id):
                 io.info(f'Closed task (todoist_id={tid})')
 
 
-def project_name_from_todoist(project_id, map_project):
-    # Project
-    p = todoist.projects.get_by_id(project_id)
-    logging.debug(f"GET_PROJECT_BY_ID project_id={project_id} project={p}")
-    project_name = ''
-    if p:
-        project_hierarchy = [p]
-        while p['parent_id']:
-            p = todoist.projects.get_by_id(p['parent_id'])
-            project_hierarchy.insert(0, p)
-            logging.debug(f"PROJECT_HIERARCHY parent_id={p['parent_id']} hierarchy={project_hierarchy}")
-        project_name = '.'.join(p['name'] for p in project_hierarchy)
-        logging.debug(f'PROJECT_HIERARCHY project_name={project_name}')
-
-        project_name = utils.try_map(
-            map_project,
-            project_name
-        )
-    return project_name
-
-
 def map_to_tw(task, map_project, map_tag):
     """Map Todoist task to TaskWarrior task."""
-    project_name = project_name_from_todoist(task['project_id'], map_project)
+    project_name = td.project_name_from_todoist(task['project_id'], map_project)
     data = {
         'tid': task['id'],
         'description': task['content'],
@@ -233,7 +214,7 @@ def sync(ctx, sync, taskw, todoist):
     if sync:
         ctx.invoke(synchronize)
 
-    todoist_tasks = get_todoist_tasks()
+    todoist_tasks = td.get_tasks()
 
     if todoist:
         close_todoist_tasks(todoist_tasks)
@@ -317,37 +298,6 @@ def parse_recur_or_prompt(due):
             value_proc=validation.validate_recur,
         )
 
-
-def get_todoist_tasks(filter_task_id=None, filter_proj_id=None):
-    """Return tasks from Todoist."""
-    # Build filter function
-    filt = {}
-    if filter_task_id:
-        filt['id'] = filter_task_id
-    if filter_proj_id:
-        filt['project_id'] = filter_proj_id
-    filter_fn = make_filter_fn(filt)
-
-    # Get all matching Todoist tasks
-    tasks = todoist.items.all(filt=filter_fn)
-    return tasks
-
-
-def make_filter_fn(filter_dict):
-    """Returns a lambda which, when given a Todoist task, will check
-    whether it has the same values for keys in `filter_dict`, returning
-    a bool
-    """
-    if not filter_dict:
-        return None
-
-    def fn(task):
-        for k, v in filter_dict.items():
-            if task[k] != v:
-                return False
-        return True
-
-    return fn
 
 """ Entrypoint """
 
