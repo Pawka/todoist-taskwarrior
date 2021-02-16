@@ -14,25 +14,31 @@ from . import __title__, __version__
 TODOIST_CACHE = '~/.todoist-sync/'
 
 todoist = None
-td = None
 taskwarrior = None
-tw = None
 
 
-""" CLI Commands """
+class Ctx:
+    """Context class to hold data shared between cli commands such as gateways.
+    """
+    td = None
+    tw = None
+
 
 @click.group()
 @click.version_option(version=__version__, prog_name=__title__)
 @click.option('--todoist-api-key', envvar='TODOIST_API_KEY', required=True)
 @click.option('--tw-config-file', envvar='TASKRC', default='~/.taskrc')
 @click.option('--debug', is_flag=True, default=False)
-def cli(todoist_api_key, tw_config_file, debug):
+@click.pass_context
+def cli(ctx, todoist_api_key, tw_config_file, debug):
     """Manage the migration of data from Todoist into Taskwarrior. """
-    global todoist, taskwarrior, td, tw
+    global todoist, taskwarrior
+
+    ctx.ensure_object(Ctx)
 
     # Configure Todoist with API key and cache
     todoist = TodoistAPI(todoist_api_key, cache=TODOIST_CACHE)
-    td = gateways.Todoist(todoist_api_key)
+    ctx.obj.td = gateways.Todoist(todoist_api_key)
 
     # Create the TaskWarrior client, overriding config with `todoist_id` field
     # which we will use to track migrated tasks and prevent imports.
@@ -43,7 +49,7 @@ def cli(todoist_api_key, tw_config_file, debug):
         config_filename=tw_config_file,
         config_overrides={ 'uda.todoist_id.type': 'string' },
     )
-    tw = gateways.TaskWarrior(tw_config_file)
+    ctx.obj.tw = gateways.TaskWarrior(tw_config_file)
 
     # Setup logging
     level = logging.DEBUG if debug else logging.INFO
@@ -52,7 +58,8 @@ def cli(todoist_api_key, tw_config_file, debug):
 
 
 @cli.command()
-def synchronize():
+@click.pass_context
+def synchronize(ctx):
     """Update the local Todoist task cache.
 
     This command accesses Todoist via the API and updates a local
@@ -64,7 +71,7 @@ def synchronize():
         ~/.todoist-sync
     """
     with io.with_feedback('Syncing tasks with todoist'):
-        td.sync()
+        ctx.obj.td.sync()
 
 
 @cli.command()
@@ -137,7 +144,7 @@ def migrate(ctx, sync, map_project, map_tag, filter_task_id, filter_proj_id):
         ctx.invoke(synchronize)
 
     # Get all matching Todoist tasks
-    tasks = td.get_tasks(filter_task_id, filter_proj_id)
+    tasks = ctx.obj.td.get_tasks(filter_task_id, filter_proj_id)
     if not tasks:
         io.warn('No matching tasks found (are you using filters?)')
         return
@@ -150,8 +157,8 @@ def migrate(ctx, sync, map_project, map_tag, filter_task_id, filter_proj_id):
         # Log message and check if exists
         io.important(f'Task {idx + 1} of {len(tasks)}: {name}')
         logging.debug(f'ITER_TASK task={task}')
-        tw_task = tw.get_task(tid)
-        data = map_to_tw(task, map_project, map_tag)
+        tw_task = ctx.obj.tw.get_task(tid)
+        data = map_to_tw(ctx, task, map_project, map_tag)
         if tw_task:
             io.info(f'Already exists (todoist_id={tid})')
             if close_if_needed(tw_task, task):
@@ -159,19 +166,19 @@ def migrate(ctx, sync, map_project, map_tag, filter_task_id, filter_proj_id):
                 continue
 
             if tw_task['status'] == TW_STATUS_PENDING:
-                tw.update(tw_task, data)
+                ctx.obj.tw.update(tw_task, data)
                 io.info(f'Updated task (todoist_id={tid})')
             continue
 
-        tw_task = tw.add_task(**data)
+        tw_task = ctx.obj.tw.add_task(**data)
         if tw_task:
             if close_if_needed(tw_task, task):
                 io.info(f'Closed task (todoist_id={tid})')
 
 
-def map_to_tw(task, map_project, map_tag):
+def map_to_tw(ctx, task, map_project, map_tag):
     """Map Todoist task to TaskWarrior task."""
-    project_name = td.project_name_from_todoist(task['project_id'], map_project)
+    project_name = ctx.obj.td.project_name_from_todoist(task['project_id'], map_project)
     data = {
         'tid': task['id'],
         'description': task['content'],
@@ -208,10 +215,10 @@ def sync(ctx, sync, taskw, todoist):
     if sync:
         ctx.invoke(synchronize)
 
-    todoist_tasks = td.get_tasks()
+    todoist_tasks = ctx.obj.td.get_tasks()
 
     if todoist:
-        close_todoist_tasks(todoist_tasks)
+        close_todoist_tasks(ctx, todoist_tasks)
 
     if taskw is True:
         ctx.invoke(migrate)
@@ -221,11 +228,11 @@ TW_STATUS_PENDING = "pending"
 TW_STATUS_COMPLETED = "completed"
 
 
-def close_todoist_tasks(tdtasks):
+def close_todoist_tasks(ctx, tdtasks):
     """Close tasks on Todoist if those are already closed on TaskWarrior."""
     for task in tdtasks:
         tid = task['id']
-        twtask = tw.get_task(tid)
+        twtask = ctx.obj.tw.get_task(tid)
         if (twtask and twtask["status"] == TW_STATUS_COMPLETED
                 and task['checked'] != 1):
             io.info(f'Closed Todoist task (todoist_id={tid})')
@@ -262,4 +269,4 @@ def parse_recur_or_prompt(due):
 """ Entrypoint """
 
 if __name__ == '__main__':
-    cli()
+    cli(obj=Ctx())
